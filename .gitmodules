@@ -1,0 +1,3 @@
+[submodule "HaskellPortMidi"]
+	path = HaskellPortMidi
+	url = https://github.com/krab5/HaskellPortMidi.git
