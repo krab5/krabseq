@@ -1,6 +1,7 @@
 module Sequencer.Sequence.Beat (
-    BeatConf, mkBeatConf, tickNumber,
-    Tick, bar, beat, tick,
+    BeatConf, barPerSequence, beatPerBar, tickPerBeat,
+    mkBeatConf, tickNumber,
+    Tick, bar, beat, tick, beatConf,
     bcmin,
     showTickReduce,
     mkTick, reset,

@@ -1,8 +1,9 @@
 module Sequencer.Sequence (
-    Sequence,
+    Sequence, beatconf,
     newSequence, newEmptySequence, newListSequence,
     resize,
-    at, add, remove, clear, vmap,
+    at, add, remove, clear,
+    rawat, rawset,
     window,
 ) where
 
@@ -13,6 +14,7 @@ data Sequence e = Sequence {
     content :: V.Vector e,
     beatconf :: BeatConf,
     noEvent :: e,
+    isNoEvent :: e -> Bool,
     defaultGen :: Tick -> e
 }
 
@@ -21,47 +23,43 @@ instance Show e => Show (Sequence e) where
       foldl (\acc -> \(id,elt) -> acc ++ (showTickReduce (intToTick bc id)) ++ " " ++ (show elt) ++ "\n") "" (V.indexed $ content seq)
       where bc = beatconf seq
 
-instance Functor Sequence where
-  -- fmap :: (a -> b) -> Sequence a -> Sequence b
-  fmap f (Sequence ct bc ne dg) =
-      Sequence (V.map f ct) bc (f ne) (f . dg)
-
-instance Applicative Sequence where
-  -- pure :: a -> Sequence a
-  pure e = Sequence (V.empty) (mkBeatConf 0 0 0) e (\_ -> e)
-
-  -- (<*>) :: Sequence (a -> b) -> Sequence a -> Sequence b
-  (Sequence fs bc1 fne fdg) <*> (Sequence a bc2 ne dg) =
-      Sequence nct tbc (fne ne) (\t -> fdg t $ dg t)
-      where tbc = bcmin bc1 bc2
-            nct = V.generate (tickNumber tbc) $ \n -> (V.unsafeIndex fs n) (V.unsafeIndex a n)
-
-
 defaultGenerator :: e -> Tick -> e
 defaultGenerator noEvent _ = noEvent
 
-newSequence :: BeatConf -> e -> (Tick -> e) -> Sequence e
-newSequence bc noevent defaultGen =
-    let v = V.generate (tickNumber bc) (defaultGen . (intToTick bc)) in
-        Sequence v bc noevent defaultGen
+defaultIsNoEvent :: Eq e => e -> (e -> Bool)
+defaultIsNoEvent e = ((==) e)
 
-newEmptySequence :: BeatConf -> e -> Sequence e
-newEmptySequence bc ne =
+newSequence :: BeatConf -> e -> (e -> Bool) -> (Tick -> e) -> Sequence e
+newSequence bc noevent isnoevent defaultGen =
+    let v = V.generate (tickNumber bc) (defaultGen . (intToTick bc)) in
+        Sequence v bc noevent isnoevent defaultGen
+
+newEmptySequence :: BeatConf -> e -> (e -> Bool) -> Sequence e
+newEmptySequence bc ne ine =
     let v = V.replicate (tickNumber bc) ne in
-        Sequence v bc ne (defaultGenerator ne)
+        Sequence v bc ne ine (defaultGenerator ne)
 
 newListSequence :: BeatConf -> Sequence [e]
-newListSequence bc = newEmptySequence bc []
+newListSequence bc = newEmptySequence bc [] null
 
 resize :: Sequence e -> BeatConf -> Sequence e
-resize s@(Sequence ct bc ne dg) newbc =
+resize s newbc =
     let newct = V.generate (tickNumber newbc) gen in
-        Sequence newct newbc ne dg
+        s { content = newct, beatconf = newbc }
         where gen n | n >= (V.length ct) = dg $ intToTick newbc n
                     | otherwise          = V.unsafeIndex ct n
+              ct = content s
+              dg = defaultGen s
 
-at :: Sequence e -> Tick -> e
-at seq t 
+at :: Eq e => Sequence e -> Tick -> Maybe e
+at seq t =
+    if evt == (noEvent seq)
+        then Nothing
+        else Just evt
+    where evt = rawat seq t
+
+rawat :: Sequence e -> Tick -> e
+rawat seq t
     | (tickToInt t) >= (V.length $ content seq) = defaultGen seq t
     | otherwise = V.unsafeIndex (content seq) (tickToInt t)
 
@@ -69,7 +67,7 @@ rawset :: Sequence e -> Tick -> (e -> e) -> Sequence e
 rawset seq tick modifier
     | (tickToInt tick) >= (V.length $ content seq) = seq
     | otherwise =
-        Sequence newseq (beatconf seq) (noEvent seq) (defaultGen seq)
+        seq { content = newseq }
         where index = tickToInt tick
               newelt = modifier $ V.unsafeIndex (content seq) index
               newseq = V.update (content seq) (V.singleton (index, newelt))
@@ -86,15 +84,13 @@ remove :: (Eq e) => Sequence [e] -> Tick -> e -> Sequence [e]
 remove seq t elt =
     rawset seq t (filter (/= elt))
 
-vmap :: ([a] -> [b]) -> Sequence [a] -> Sequence [b]
-vmap f s =
-    Sequence ((V.map f) $ content s) (beatconf s) (f $ noEvent s) (f . (defaultGen s))
-
 window :: Tick -> Int -> (e -> Bool) -> Sequence [e] -> V.Vector [e]
-window start size p (Sequence ct bc ne dg) =
+window start size p seq =
     V.map (filter p) $ V.slice lower tsize ct
     where lower = tickToInt start
           tsize = min ((V.length ct) - lower) size
+          ct = content seq
+
 
 
 
