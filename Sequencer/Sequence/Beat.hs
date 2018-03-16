@@ -4,7 +4,7 @@ module Sequencer.Sequence.Beat (
     Tick, bar, beat, tick, beatConf,
     bcmin,
     showTickReduce,
-    mkTick, reset,
+    mkTick, reset, maxTick,
     incTick, incBeat, incBar,
     tickToInt, intToTick
 ) where
@@ -94,6 +94,10 @@ incBar t@(Tick bar beat tick bc@(BeatConf bps bpb tpb)) =
 
 reset :: Tick -> Tick
 reset (Tick _ _ _ bc) = Tick 0 0 0 bc
+
+maxTick :: BeatConf -> Tick
+maxTick bc =
+    Tick ((barPerSequence bc) - 1) ((beatPerBar bc) - 1) ((tickPerBeat bc) - 1) bc
 
 tickToInt :: Tick -> Int
 tickToInt (Tick bar beat tick (BeatConf _ bpb tpb)) =

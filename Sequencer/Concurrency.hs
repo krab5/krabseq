@@ -7,6 +7,8 @@ import Control.Concurrent.MVar as MV
 import qualified Control.Concurrent.MSem as Sem
 import Control.Monad.STM
 import Control.Concurrent.STM.TQueue
+import Control.Concurrent.AlarmClock
+import System.Clock
 
 foreach :: Foldable t => t a -> (a -> IO ()) -> IO ()
 foreach elts computation =
@@ -78,6 +80,24 @@ interrupt (InterruptibleDataChannel sem _) =
 interruptAndFlush :: InterruptibleDataChannel a -> IO [a]
 interruptAndFlush (InterruptibleDataChannel sem que) =
     Sem.signal sem >> (atomically $ flushTQueue que)
+
+instance TimeScale TimeSpec where
+  getAbsoluteTime = getTime Monotonic
+  earlierOf = min
+  microsecondsDiff t1 t2 = (`div` 1000) $ toNanoSecs $ diffTimeSpec t1 t2
+
+rerun :: TimeSpec -> StoppingChannel -> IO () -> AlarmClock TimeSpec -> IO ()
+rerun ts end compute alarm = do
+    setAlarm alarm ts
+    stopped <- hasStop end
+    if stopped
+        then destroyAlarmClock alarm
+        else compute
+
+startAlarm :: TimeSpec -> StoppingChannel -> IO () -> IO ()
+startAlarm ts end compute =
+    (newAlarmClock $ rerun ts end compute) >>= setAlarmNow
+
 
 
 

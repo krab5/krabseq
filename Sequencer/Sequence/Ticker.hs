@@ -34,17 +34,35 @@ type BPM = Int
 
 data Ticker = Ticker {
     delay :: Int,
-    current_ :: Int
-}
+    current_ :: Int,
+    conf :: TickerConfiguration,
+    tbc :: TempoBeatConf
+} deriving (Eq)
+
+instance Show Ticker where
+  show (Ticker d c cf (TempoBeatConf bc bpm)) =
+      "[[" ++ show c ++ "/" ++ show d ++ "|" ++ show bc ++ ",BPM=" ++ show bpm ++ "]]"
 
 data TempoBeatConf = TempoBeatConf {
     tbeatconf :: BeatConf,
     tbpm :: BPM
-}
+} deriving Eq
 
-data TickConfiguration = TickConfiguration {
+instance Show TempoBeatConf where
+  show (TempoBeatConf bc bpm) =
+      "<<" ++ show bc ++ ",BPM=" ++ show bpm ++ ">>"
+
+data TickerConfiguration = TickerConfiguration {
     atomic_tpm :: Int
-}
+} deriving Eq
+
+tcToMicrosec :: TickerConfiguration -> Int
+tcToMicrosec (TickerConfiguration tpm) =
+    60000000 `div` tpm
+
+tcToNanosec :: TickerConfiguration -> Int
+tcToNanosec (TickerConfiguration tpm) =
+    60000000000 `div` tpm
 
 minitick :: Ticker -> (Bool,Ticker)
 minitick t =
@@ -57,17 +75,29 @@ tickPerMinute :: TempoBeatConf -> Int
 tickPerMinute =
     (*) <$> tbpm <*> (tickPerBeat . tbeatconf)
 
-makeConf :: [TempoBeatConf] -> TickConfiguration
+makeConf :: [TempoBeatConf] -> TickerConfiguration
 makeConf =
-    (TickConfiguration) . (foldr ((flip lcm) <$> tickPerMinute) 1)
+    (TickerConfiguration) . (foldr ((flip lcm) <$> tickPerMinute) 1)
 
-makeTicker :: TickConfiguration -> TempoBeatConf -> Ticker
+updateConf :: TickerConfiguration -> [TempoBeatConf] -> TickerConfiguration
+updateConf (TickerConfiguration old) =
+    (TickerConfiguration) . (foldr ((flip lcm) <$> tickPerMinute) old)
+
+makeTicker :: TickerConfiguration -> TempoBeatConf -> Ticker
 makeTicker tc tbc =
     let δt = (atomic_tpm tc) `div` (tickPerMinute tbc) in
-        Ticker δt 1
+        Ticker δt 1 tc tbc
 
-quantizeOnNextTick :: Ticker -> Ticker -> Ticker
-quantizeOnNextTick ticker sync =
+-- Note : erase current_
+updateTicker :: TickerConfiguration -> TempoBeatConf -> Ticker -> Ticker
+updateTicker newconf newtbc old =
+    makeTicker newconf newtbc
+
+resetTicker :: Ticker -> Ticker
+resetTicker t = t { current_ = 1 }
+
+quantizeOnNextTick :: Ticker -> Tick -> Ticker -> Ticker
+quantizeOnNextTick ticker _ sync =
     ticker { delay = current_ sync }
 
 {-
@@ -131,6 +161,44 @@ quantizeOnNextSequence_ ticker syncbc currenttick currentbeat currentbar sync =
 quantizeOnNextSequence :: Ticker -> Tick -> Ticker -> Ticker
 quantizeOnNextSequence ticker synctick syncticker =
     quantizeOnNextSequence_ ticker (beatConf synctick) (tick synctick) (beat synctick) (bar synctick) syncticker
+
+
+data RTickSync = OnTick | OnBeat | OnBar | OnSequence
+data RTick = RTick Tick Ticker Bool
+
+isTick :: RTick -> Bool
+isTick (RTick _ _ b) = b
+
+toTick :: RTick -> Tick
+toTick (RTick t _ _) = t
+
+newRTick :: TickerConfiguration -> TempoBeatConf -> RTick
+newRTick tc tbc =
+    let ticker = makeTicker tc tbc
+        tick = maxTick $ tbeatconf tbc in
+        RTick tick ticker False
+
+syncRTick :: RTick -> RTickSync -> RTick -> RTick
+syncRTick rtick@(RTick tick ticker _) conf other@(RTick otick oticker _) =
+    RTick tick' (qticker conf) False
+    where tick' = reset tick
+          qtickerf OnTick     = quantizeOnNextTick
+          qtickerf OnBeat     = quantizeOnNextBeat
+          qtickerf OnBar      = quantizeOnNextBar
+          qtickerf OnSequence = quantizeOnNextSequence
+          qticker t = (qtickerf t) ticker otick oticker
+
+advanceRTick :: RTick -> RTick
+advanceRTick (RTick tick ticker _) =
+    let (res,ticker') = minitick ticker' in
+        if res
+            then RTick (incTick tick) ticker' True
+            else RTick tick ticker' False
+
+-- Will trigger a tick on the next-mini tick
+resetRTick :: RTick -> RTick
+resetRTick (RTick tick ticker _) = 
+    RTick (maxTick $ beatConf tick) (resetTicker ticker) False
 
 
 

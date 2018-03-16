@@ -51,9 +51,9 @@ resize s newbc =
               ct = content s
               dg = defaultGen s
 
-at :: Eq e => Sequence e -> Tick -> Maybe e
+at :: Sequence e -> Tick -> Maybe e
 at seq t =
-    if evt == (noEvent seq)
+    if (isNoEvent seq) evt
         then Nothing
         else Just evt
     where evt = rawat seq t
